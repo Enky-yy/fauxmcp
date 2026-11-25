@@ -206,6 +206,9 @@ src/
     └── retrieve.ts   # fetch / scrape / query / cache tools
 ```
 
+CI (`.github/workflows/ci.yml`) runs typecheck + unit tests on Node 22/24/26, the end-to-end
+smoke test, and a publishable-tarball check on every push and pull request.
+
 ## License
 
 MIT
