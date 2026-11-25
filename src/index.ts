@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { serverInfo } from "./lib/env.js";
 import { runServer } from "./server.js";
 

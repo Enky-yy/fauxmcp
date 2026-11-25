@@ -1,10 +1,12 @@
 {
   "name": "@enky-yy/fauxmcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The data toolbox MCP — generate realistic fake data, fetch datasets from URLs, scrape HTML tables, and query public APIs.",
   "license": "MIT",
   "author": "Enky-yy",
   "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "repository": {
     "type": "git",
     "url": "https://github.com/Enky-yy/fauxmcp.git"
