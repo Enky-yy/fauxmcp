@@ -1,6 +1,6 @@
 {
   "name": "@enky-yy/fauxmcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "The data toolbox MCP — generate realistic fake data, fetch datasets from URLs, scrape HTML tables, and query public APIs.",
   "license": "MIT",
   "author": "Enky-yy",

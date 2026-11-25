@@ -5,6 +5,12 @@ All notable changes to fauxmcp will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] — 2026-11-26
+
+### Fixed
+
+- Restored shebang in entry point so npm accepts `dist/index.js` as a valid bin script
+
 ## [0.2.0] — 2026-11-26
 
 ### Added
