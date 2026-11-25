@@ -1,7 +1,7 @@
 # fauxmcp
 
 [![CI](https://github.com/Enky-yy/fauxmcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Enky-yy/fauxmcp/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/fauxmcp.svg)](https://www.npmjs.com/package/fauxmcp)
+[![npm](https://img.shields.io/npm/v/@enky-yy/fauxmcp.svg)](https://www.npmjs.com/package/@enky-yy/fauxmcp)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > **One MCP for all your data.** Generate realistic fake data, fetch real datasets from any URL,
@@ -24,13 +24,13 @@ one-off scraping scripts just to get a table of data.
 ## Quick start
 
 ```bash
-npx -y fauxmcp
+npx -y @enky-yy/fauxmcp
 ```
 
 Or install globally:
 
 ```bash
-npm install -g fauxmcp
+npm install -g @enky-yy/fauxmcp
 fauxmcp
 ```
 
@@ -43,7 +43,7 @@ Add to `claude_desktop_config.json`:
   "mcpServers": {
     "fauxmcp": {
       "command": "npx",
-      "args": ["-y", "fauxmcp"],
+      "args": ["-y", "@enky-yy/fauxmcp"],
       "env": {
         "FAUX_MAX_ROWS": "5000"
       }

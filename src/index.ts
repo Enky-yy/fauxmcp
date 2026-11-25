@@ -19,7 +19,7 @@ if (args.includes("--help") || args.includes("-h")) {
       "       fauxmcp --version  print the version",
       "",
       "Configure it in your MCP client (Claude Desktop, Cursor, VS Code, …)",
-      "with command \"npx\" and args [\"-y\", \"fauxmcp\"].",
+      "with command \"npx\" and args [\"-y\", \"@enky-yy/fauxmcp\"].",
       "",
       "Docs: https://github.com/Enky-yy/fauxmcp",
     ].join("\n"),
