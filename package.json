@@ -5,6 +5,12 @@
   "license": "MIT",
   "author": "Enky-yy",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Enky-yy/fauxmcp.git"
+  },
+  "homepage": "https://github.com/Enky-yy/fauxmcp",
+  "bugs": "https://github.com/Enky-yy/fauxmcp/issues",
   "bin": {
     "fauxmcp": "./dist/index.js"
   },
