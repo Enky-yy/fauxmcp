@@ -25,7 +25,21 @@ export interface DatasetMeta {
 const INDEX_FILE = "index.json";
 
 async function ensureDir(): Promise<void> {
-  await fs.mkdir(config.cacheDir, { recursive: true });
+  await fs.mkdir(config.cacheDir, { recursive: true, mode: 0o700 });
+}
+
+/** Resolve a cache file name, rejecting anything that escapes the cache dir. */
+function resolveCacheFile(file: string): string {
+  const base = path.resolve(config.cacheDir);
+  const name = path.basename(file);
+  if (name !== file) {
+    throw new Error(`Unsafe cache file name: ${file}`);
+  }
+  const target = path.resolve(base, name);
+  if (!target.startsWith(`${base}${path.sep}`)) {
+    throw new Error(`Unsafe cache file path: ${file}`);
+  }
+  return target;
 }
 
 export function slugify(name: string): string {
@@ -63,7 +77,7 @@ async function saveIndex(entries: DatasetMeta[]): Promise<void> {
   await fs.writeFile(
     path.join(config.cacheDir, INDEX_FILE),
     JSON.stringify(sorted, null, 2),
-    "utf8",
+    { encoding: "utf8", mode: 0o600 },
   );
 }
 
@@ -83,7 +97,10 @@ export async function saveDataset(input: SaveDatasetInput): Promise<DatasetMeta>
   const id = slugify(input.name);
   const existing = entries.find((entry) => entry.id === id);
   const file = `${id}.${extensionFor(input.format)}`;
-  await fs.writeFile(path.join(config.cacheDir, file), input.content, "utf8");
+  await fs.writeFile(resolveCacheFile(file), input.content, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
 
   const now = new Date().toISOString();
   const meta: DatasetMeta = {
@@ -116,7 +133,7 @@ export async function getDataset(id: string): Promise<LoadedDataset | null> {
   const meta = entries.find((entry) => entry.id === id || entry.file === id);
   if (!meta) return null;
   try {
-    const content = await fs.readFile(path.join(config.cacheDir, meta.file), "utf8");
+    const content = await fs.readFile(resolveCacheFile(meta.file), "utf8");
     return { meta, content };
   } catch {
     return null;

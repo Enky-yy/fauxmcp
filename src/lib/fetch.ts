@@ -1,5 +1,6 @@
 import { config } from "./env.js";
 import { formatBytes } from "./format.js";
+import { assertHttpProtocol, assertNetworkAllowed, redactUrl } from "./security.js";
 
 export interface FetchResult {
   text: string;
@@ -9,6 +10,9 @@ export interface FetchResult {
 }
 
 export class FetchLimitError extends Error {}
+
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
 
 function concatChunks(chunks: Uint8Array[]): Uint8Array {
   const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
@@ -22,7 +26,12 @@ function concatChunks(chunks: Uint8Array[]): Uint8Array {
 }
 
 /**
- * Fetch a URL with guardrails: http(s) only, a timeout, and a byte cap.
+ * Fetch a URL with guardrails:
+ * - http(s) only
+ * - cloud metadata / link-local hosts blocked (unless FAUX_ALLOW_METADATA=1)
+ * - redirects followed manually so every hop is re-validated
+ * - a timeout and a streaming byte cap
+ *
  * Throws FetchLimitError when the response exceeds the configured size.
  */
 export async function guardedFetch(
@@ -30,15 +39,13 @@ export async function guardedFetch(
   init: RequestInit = {},
   opts: { timeoutMs?: number; maxBytes?: number } = {},
 ): Promise<FetchResult> {
-  let parsed: URL;
+  let current: URL;
   try {
-    parsed = new URL(url);
+    current = new URL(url);
   } catch {
-    throw new Error(`Invalid URL: ${url}`);
+    throw new Error(`Invalid URL: ${redactUrl(url)}`);
   }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(`Only http:// and https:// URLs are allowed (got ${parsed.protocol})`);
-  }
+  assertHttpProtocol(current);
 
   const timeoutMs = opts.timeoutMs ?? config.fetchTimeoutMs;
   const maxBytes = opts.maxBytes ?? config.maxSizeMb * 1024 * 1024;
@@ -48,61 +55,105 @@ export async function guardedFetch(
   }, timeoutMs);
 
   try {
-    const response = await fetch(parsed, { ...init, signal: controller.signal });
-    const finalUrl = response.url || parsed.href;
-    const finalParsed = new URL(finalUrl);
-    if (finalParsed.protocol !== "http:" && finalParsed.protocol !== "https:") {
-      throw new Error(`Redirected to a non-http(s) URL: ${finalUrl}`);
-    }
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${response.statusText} for ${finalUrl}`);
-    }
+    let method = (init.method ?? "GET").toUpperCase();
+    let body = init.body ?? null;
+    const headers = new Headers(init.headers);
+    let redirects = 0;
 
-    const declared = Number(response.headers.get("content-length") ?? 0);
-    if (declared > maxBytes) {
-      throw new FetchLimitError(
-        `Response is ${formatBytes(declared)}, above the ${formatBytes(maxBytes)} limit. ` +
-          `Set FAUX_MAX_SIZE_MB to allow larger downloads.`,
-      );
-    }
+    while (true) {
+      assertHttpProtocol(current);
+      assertNetworkAllowed(current);
 
-    const reader = response.body?.getReader();
-    const chunks: Uint8Array[] = [];
-    let bytes = 0;
+      const response = await fetch(current, {
+        ...init,
+        method,
+        body: method === "GET" || method === "HEAD" ? undefined : body,
+        headers,
+        redirect: "manual",
+        signal: controller.signal,
+      });
 
-    if (reader) {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        bytes += value.byteLength;
-        if (bytes > maxBytes) {
-          await reader.cancel();
-          throw new FetchLimitError(
-            `Response exceeded the ${formatBytes(maxBytes)} limit. ` +
-              `Set FAUX_MAX_SIZE_MB to allow larger downloads.`,
-          );
+      if (REDIRECT_STATUS.has(response.status)) {
+        const location = response.headers.get("location");
+        if (!location) {
+          throw new Error(`Redirect without a Location header from ${redactUrl(current)}`);
         }
-        chunks.push(value);
+        if (++redirects > MAX_REDIRECTS) {
+          throw new Error(`Too many redirects (maximum ${MAX_REDIRECTS})`);
+        }
+
+        let next: URL;
+        try {
+          next = new URL(location, current);
+        } catch {
+          throw new Error(`Invalid redirect location: ${location}`);
+        }
+
+        if (
+          response.status === 303 ||
+          ((response.status === 301 || response.status === 302) && method === "POST")
+        ) {
+          method = "GET";
+          body = null;
+          headers.delete("content-type");
+          headers.delete("content-length");
+        }
+
+        await response.body?.cancel().catch(() => undefined);
+        current = next;
+        continue;
       }
-    } else {
-      const buffer = new Uint8Array(await response.arrayBuffer());
-      bytes = buffer.byteLength;
-      if (bytes > maxBytes) {
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText} for ${redactUrl(current)}`);
+      }
+
+      const declared = Number(response.headers.get("content-length") ?? 0);
+      if (declared > maxBytes) {
         throw new FetchLimitError(
-          `Response is ${formatBytes(bytes)}, above the ${formatBytes(maxBytes)} limit. ` +
+          `Response is ${formatBytes(declared)}, above the ${formatBytes(maxBytes)} limit. ` +
             `Set FAUX_MAX_SIZE_MB to allow larger downloads.`,
         );
       }
-      chunks.push(buffer);
-    }
 
-    const text = new TextDecoder("utf-8").decode(concatChunks(chunks));
-    return {
-      text,
-      contentType: response.headers.get("content-type") ?? "",
-      finalUrl,
-      bytes,
-    };
+      const reader = response.body?.getReader();
+      const chunks: Uint8Array[] = [];
+      let bytes = 0;
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bytes += value.byteLength;
+          if (bytes > maxBytes) {
+            await reader.cancel();
+            throw new FetchLimitError(
+              `Response exceeded the ${formatBytes(maxBytes)} limit. ` +
+                `Set FAUX_MAX_SIZE_MB to allow larger downloads.`,
+            );
+          }
+          chunks.push(value);
+        }
+      } else {
+        const buffer = new Uint8Array(await response.arrayBuffer());
+        bytes = buffer.byteLength;
+        if (bytes > maxBytes) {
+          throw new FetchLimitError(
+            `Response is ${formatBytes(bytes)}, above the ${formatBytes(maxBytes)} limit. ` +
+              `Set FAUX_MAX_SIZE_MB to allow larger downloads.`,
+          );
+        }
+        chunks.push(buffer);
+      }
+
+      const text = new TextDecoder("utf-8").decode(concatChunks(chunks));
+      return {
+        text,
+        contentType: response.headers.get("content-type") ?? "",
+        finalUrl: current.href,
+        bytes,
+      };
+    }
   } finally {
     clearTimeout(timer);
   }

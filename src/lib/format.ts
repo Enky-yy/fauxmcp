@@ -21,17 +21,40 @@ export function toJson(rows: Row[]): string {
   return JSON.stringify(rows, null, 2);
 }
 
-export function toDelimited(rows: Row[], delimiter: string): string {
+export interface DelimitedOptions {
+  /** Prefix formula-like string cells so spreadsheets treat them as text. */
+  neutralizeFormulas?: boolean;
+}
+
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+
+function neutralizeFormula(value: unknown): unknown {
+  if (typeof value === "string" && FORMULA_PREFIX.test(value)) {
+    return `'${value}`;
+  }
+  return value;
+}
+
+export function toDelimited(rows: Row[], delimiter: string, options: DelimitedOptions = {}): string {
   if (rows.length === 0) return "";
-  return Papa.unparse(rows as Record<string, unknown>[], {
+  const safeRows = options.neutralizeFormulas
+    ? rows.map((row) => {
+        const next: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(row)) {
+          next[key] = neutralizeFormula(value);
+        }
+        return next;
+      })
+    : (rows as Record<string, unknown>[]);
+  return Papa.unparse(safeRows, {
     delimiter,
     columns: columnsOf(rows),
     newline: "\n",
   });
 }
 
-export function toCsv(rows: Row[]): string {
-  return toDelimited(rows, ",");
+export function toCsv(rows: Row[], options: DelimitedOptions = {}): string {
+  return toDelimited(rows, ",", options);
 }
 
 function quoteIdent(name: string): string {
@@ -73,23 +96,31 @@ export function toSql(rows: Row[], tableName: string): string {
   return [create, "", ...inserts].join("\n");
 }
 
-function escapeCell(value: unknown): string {
-  return String(value ?? "")
-    .replace(/\|/g, "\\|")
-    .replace(/\r?\n/g, " ");
+function escapeCell(value: unknown, maxLength: number): string {
+  let text = String(value ?? "");
+  if (text.length > maxLength) {
+    text = `${text.slice(0, Math.max(0, maxLength - 1))}…`;
+  }
+  return text.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 }
 
 /** Render rows as a GitHub-flavored Markdown table. */
-export function toMarkdownTable(rows: Row[], options: { maxRows?: number; maxColumns?: number } = {}): string {
+export function toMarkdownTable(
+  rows: Row[],
+  options: { maxRows?: number; maxColumns?: number; maxCellLength?: number } = {},
+): string {
   if (rows.length === 0) return "_No rows._";
   const allCols = columnsOf(rows);
   const maxColumns = options.maxColumns ?? allCols.length;
+  const maxCellLength = options.maxCellLength ?? 300;
   const cols = allCols.slice(0, maxColumns);
   const shown = options.maxRows ? rows.slice(0, options.maxRows) : rows;
 
-  const header = `| ${cols.map(escapeCell).join(" | ")} |`;
+  const header = `| ${cols.map((col) => escapeCell(col, maxCellLength)).join(" | ")} |`;
   const divider = `| ${cols.map(() => "---").join(" | ")} |`;
-  const body = shown.map((row) => `| ${cols.map((col) => escapeCell(row[col])).join(" | ")} |`);
+  const body = shown.map(
+    (row) => `| ${cols.map((col) => escapeCell(row[col], maxCellLength)).join(" | ")} |`,
+  );
 
   let out = [header, divider, ...body].join("\n");
   const notes: string[] = [];
@@ -107,14 +138,15 @@ export function formatRows(
   rows: Row[],
   format: OutputFormat,
   tableName = "generated_data",
+  options: DelimitedOptions = {},
 ): string {
   switch (format) {
     case "json":
       return toJson(rows);
     case "csv":
-      return toCsv(rows);
+      return toCsv(rows, options);
     case "tsv":
-      return toDelimited(rows, "\t");
+      return toDelimited(rows, "\t", options);
     case "sql":
       return toSql(rows, tableName);
     case "markdown":
@@ -124,6 +156,29 @@ export function formatRows(
       throw new Error(`Unsupported output format: ${String(exhaustive)}`);
     }
   }
+}
+
+function maxBacktickRun(text: string): number {
+  let longest = 0;
+  let run = 0;
+  for (const char of text) {
+    if (char === "`") {
+      run += 1;
+      if (run > longest) longest = run;
+    } else {
+      run = 0;
+    }
+  }
+  return longest;
+}
+
+/**
+ * Wrap text in a code fence long enough that content containing backticks
+ * cannot break out of the block.
+ */
+export function fenced(text: string, language = ""): string {
+  const fence = "`".repeat(Math.max(3, maxBacktickRun(text) + 1));
+  return `${fence}${language}\n${text}\n${fence}`;
 }
 
 export function extensionFor(format: string): string {

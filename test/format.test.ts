@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   columnsOf,
+  fenced,
   formatRows,
   toCsv,
+  toDelimited,
   toMarkdownTable,
   toSql,
   truncate,
@@ -31,6 +33,31 @@ describe("toCsv", () => {
     expect(csv).toContain('"hello, world"');
     expect(csv).toContain('"say ""hi"""');
   });
+
+  it("neutralizes spreadsheet formula prefixes when asked", () => {
+    const csv = toCsv(
+      [{ a: "=1+1", b: "+SUM(A1)", c: "-2", d: "@cmd", e: "ok", n: 5 }],
+      { neutralizeFormulas: true },
+    );
+    expect(csv).toContain("'=1+1");
+    expect(csv).toContain("'+SUM(A1)");
+    expect(csv).toContain("'-2");
+    expect(csv).toContain("'@cmd");
+    expect(csv).toContain("ok");
+    // Numbers keep their type and are never prefixed.
+    expect(csv).toContain("5");
+    expect(csv).not.toContain("'5");
+  });
+
+  it("leaves values alone by default", () => {
+    expect(toCsv([{ a: "=1+1" }])).toBe("a\n=1+1");
+  });
+});
+
+describe("toDelimited", () => {
+  it("supports TSV output", () => {
+    expect(toDelimited([{ a: 1, b: 2 }], "\t").trim()).toBe("a\tb\n1\t2");
+  });
 });
 
 describe("toSql", () => {
@@ -54,6 +81,13 @@ describe("toMarkdownTable", () => {
     expect(table).toContain("Bob \\| Builder");
   });
 
+  it("truncates oversized cells", () => {
+    const table = toMarkdownTable([{ data: "x".repeat(500) }], { maxCellLength: 10 });
+    const row = table.split("\n")[2];
+    expect(row.length).toBeLessThan(40);
+    expect(row).toContain("…");
+  });
+
   it("reports truncation notes", () => {
     const table = toMarkdownTable([{ a: 1 }, { a: 2 }, { a: 3 }], { maxRows: 2 });
     expect(table).toContain("1 more row");
@@ -61,6 +95,18 @@ describe("toMarkdownTable", () => {
 
   it("renders an empty marker", () => {
     expect(toMarkdownTable([])).toBe("_No rows._");
+  });
+});
+
+describe("fenced", () => {
+  it("uses a longer fence when content contains backticks", () => {
+    const out = fenced("before ``` inside", "json");
+    expect(out.startsWith("````json")).toBe(true);
+    expect(out.endsWith("````")).toBe(true);
+  });
+
+  it("uses a plain fence for normal content", () => {
+    expect(fenced("hello", "json")).toBe("```json\nhello\n```");
   });
 });
 

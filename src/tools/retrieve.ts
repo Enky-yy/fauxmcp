@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createHash } from "node:crypto";
 import Papa from "papaparse";
 import { z } from "zod";
 import { config } from "../lib/env.js";
@@ -10,7 +11,7 @@ import {
   type DatasetMeta,
 } from "../lib/cache.js";
 import { guardedFetch } from "../lib/fetch.js";
-import { formatBytes, formatRows, toMarkdownTable, truncate } from "../lib/format.js";
+import { formatBytes, formatRows, fenced, toMarkdownTable, truncate } from "../lib/format.js";
 import { extractTables, tableToRows } from "../lib/html.js";
 import type { Row } from "../lib/faker.js";
 import { ok, withErrors } from "../lib/result.js";
@@ -67,9 +68,27 @@ function detectFormat(
   return "text";
 }
 
+/**
+ * Cache key for API responses. GETs key on the URL alone so existing caches
+ * keep working; every other method mixes in the method and a body hash so a
+ * POST/PUT response can never be served back as a GET (or vice versa).
+ */
+export function apiCacheKey(method: string, url: string, body: string | undefined): string {
+  const upper = method.toUpperCase();
+  if (upper === "GET") return url;
+  const digest = createHash("sha256")
+    .update(`${upper} ${url}\n${body ?? ""}`)
+    .digest("hex")
+    .slice(0, 16);
+  return `${url}#fauxmcp-${upper.toLowerCase()}-${digest}`;
+}
+
+const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function normalizeRow(input: Record<string, unknown>): Row {
   const row: Row = {};
   for (const [key, value] of Object.entries(input)) {
+    if (RESERVED_KEYS.has(key)) continue;
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
       row[key] = value;
     } else if (value === null || value === undefined) {
@@ -133,15 +152,23 @@ function parsePayload(text: string, format: DetectedFormat): ParsedPayload {
 
 function previewPayload(parsed: ParsedPayload, text: string, maxRows: number): string {
   if (parsed.rows && parsed.rows.length > 0) {
-    return toMarkdownTable(parsed.rows, { maxRows, maxColumns: 12 });
+    return truncate(
+      toMarkdownTable(parsed.rows, {
+        maxRows,
+        maxColumns: 12,
+        maxCellLength: config.maxCellChars,
+      }),
+      config.previewChars,
+    );
   }
   if (parsed.rows && parsed.rows.length === 0) {
     return "_The dataset is empty (0 rows)._";
   }
+  const budget = Math.max(500, config.previewChars - 20);
   if (parsed.json !== undefined) {
-    return `\`\`\`json\n${truncate(JSON.stringify(parsed.json, null, 2), 3000)}\n\`\`\``;
+    return fenced(truncate(JSON.stringify(parsed.json, null, 2), budget), "json");
   }
-  return `\`\`\`\n${truncate(text, 3000)}\n\`\`\``;
+  return fenced(truncate(text, budget));
 }
 
 function nameFromUrl(url: string, fallback = "dataset"): string {
@@ -300,7 +327,8 @@ export function registerRetrievalTools(server: McpServer): void {
         const lines = [`✅ Found **${tables.length}** table(s) on ${fetched.finalUrl}`];
         for (const table of tables) {
           const rows = tableToRows(table);
-          const csv = formatRows(rows, "csv");
+          // Untrusted web content: neutralize spreadsheet formula prefixes.
+          const csv = formatRows(rows, "csv", "table", { neutralizeFormulas: true });
           const meta = await saveDataset({
             name: `${base}-table-${table.index + 1}`,
             content: csv,
@@ -315,10 +343,14 @@ export function registerRetrievalTools(server: McpServer): void {
           );
         }
         const first = tables[0];
-        const preview = toMarkdownTable(tableToRows(first), {
-          maxRows: previewLimit,
-          maxColumns: 12,
-        });
+        const preview = truncate(
+          toMarkdownTable(tableToRows(first), {
+            maxRows: previewLimit,
+            maxColumns: 12,
+            maxCellLength: config.maxCellChars,
+          }),
+          config.previewChars,
+        );
         return ok(
           `${lines.join("\n")}\n\n#### Preview — table ${first.index + 1}\n\n${preview}`,
         );
@@ -339,7 +371,8 @@ export function registerRetrievalTools(server: McpServer): void {
       }
 
       const rows = tableToRows(table);
-      const csv = formatRows(rows, "csv");
+      // Untrusted web content: neutralize spreadsheet formula prefixes.
+      const csv = formatRows(rows, "csv", "table", { neutralizeFormulas: true });
       const meta = await saveDataset({
         name: `${base}-table-${table.index + 1}`,
         content: csv,
@@ -359,10 +392,14 @@ export function registerRetrievalTools(server: McpServer): void {
       ].join("\n");
 
       return ok(
-        `${header}\n\n${toMarkdownTable(rows, {
-          maxRows: previewLimit,
-          maxColumns: 12,
-        })}`,
+        `${header}\n\n${truncate(
+          toMarkdownTable(rows, {
+            maxRows: previewLimit,
+            maxColumns: 12,
+            maxCellLength: config.maxCellChars,
+          }),
+          config.previewChars,
+        )}`,
       );
     }),
   );
@@ -404,7 +441,7 @@ export function registerRetrievalTools(server: McpServer): void {
       for (const [key, value] of Object.entries(args.params ?? {})) {
         target.searchParams.set(key, String(value));
       }
-      const cacheKey = target.toString();
+      const targetUrl = target.toString();
 
       const headers: Record<string, string> = {
         accept: "application/json",
@@ -421,9 +458,13 @@ export function registerRetrievalTools(server: McpServer): void {
         if (!hasContentType) headers["content-type"] = "application/json";
       }
 
+      // Only GET responses are cacheable, and the key encodes the method (and
+      // body hash) so non-GET responses never collide with GET entries.
+      const cacheKey = apiCacheKey(args.method, targetUrl, body);
+
       let text: string | null = null;
       let contentType = "";
-      let finalUrl = cacheKey;
+      let finalUrl = targetUrl;
       let fromCache = false;
 
       if (args.method === "GET" && !args.refresh) {
@@ -433,13 +474,13 @@ export function registerRetrievalTools(server: McpServer): void {
           if (loaded) {
             text = loaded.content;
             fromCache = true;
-            finalUrl = cached.sourceUrl ?? cacheKey;
+            finalUrl = cached.sourceUrl ?? targetUrl;
           }
         }
       }
 
       if (text === null) {
-        const result = await guardedFetch(cacheKey, {
+        const result = await guardedFetch(targetUrl, {
           method: args.method,
           headers,
           body,
@@ -463,13 +504,23 @@ export function registerRetrievalTools(server: McpServer): void {
 
       let preview: string;
       if (rows && rows.length > 0) {
-        preview = toMarkdownTable(rows, { maxRows: limit, maxColumns: 12 });
+        preview = truncate(
+          toMarkdownTable(rows, {
+            maxRows: limit,
+            maxColumns: 12,
+            maxCellLength: config.maxCellChars,
+          }),
+          config.previewChars,
+        );
       } else if (rows && rows.length === 0) {
         preview = "_Empty array._";
       } else if (isJson) {
-        preview = `\`\`\`json\n${truncate(JSON.stringify(json, null, 2), 3000)}\n\`\`\``;
+        preview = fenced(
+          truncate(JSON.stringify(json, null, 2), config.previewChars),
+          "json",
+        );
       } else {
-        preview = `\`\`\`\n${truncate(text, 3000)}\n\`\`\``;
+        preview = fenced(truncate(text, config.previewChars));
       }
 
       const header = [
@@ -592,13 +643,19 @@ export function registerRetrievalTools(server: McpServer): void {
         const end = args.offset + slice.length;
         return ok(
           `${header}\n\nShowing rows ${args.offset + 1}–${end} of ${parsed.rows.length}:\n\n` +
-            toMarkdownTable(slice, { maxColumns: 12 }),
+            truncate(
+              toMarkdownTable(slice, { maxColumns: 12, maxCellLength: config.maxCellChars }),
+              config.previewChars,
+            ),
         );
       }
 
       if (parsed.json !== undefined) {
         return ok(
-          `${header}\n\n\`\`\`json\n${truncate(JSON.stringify(parsed.json, null, 2), 6000)}\n\`\`\``,
+          `${header}\n\n${fenced(
+            truncate(JSON.stringify(parsed.json, null, 2), config.previewChars),
+            "json",
+          )}`,
         );
       }
 
@@ -606,7 +663,7 @@ export function registerRetrievalTools(server: McpServer): void {
       const slice = lines.slice(args.offset, args.offset + args.limit);
       return ok(
         `${header}\n\nShowing lines ${args.offset + 1}–${args.offset + slice.length} of ` +
-          `${lines.length}:\n\n\`\`\`\n${slice.join("\n")}\n\`\`\``,
+          `${lines.length}:\n\n${fenced(truncate(slice.join("\n"), config.previewChars))}`,
       );
     }),
   );

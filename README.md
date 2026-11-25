@@ -161,8 +161,11 @@ you:
 | `FAUX_MAX_SIZE_MB` | `10` | Max download size |
 | `FAUX_FETCH_TIMEOUT_MS` | `30000` | Fetch timeout |
 | `FAUX_PREVIEW_ROWS` | `20` | Rows shown inline in responses |
+| `FAUX_PREVIEW_CHARS` | `8000` | Character cap for any inline preview |
+| `FAUX_MAX_CELL_CHARS` | `300` | Character cap per preview table cell |
 | `FAUX_MAX_TABLES` | `10` | Max HTML tables scraped per page |
 | `FAUX_CACHE_DIR` | `~/.fauxmcp/datasets` | Dataset cache directory |
+| `FAUX_ALLOW_METADATA` | unset | Set to `1` to allow fetches to cloud metadata / link-local hosts |
 
 ## Reproducibility
 
@@ -172,14 +175,28 @@ across runs; omit the seed to get data relative to *now*.
 
 ## Safety & limits
 
-- **Context protection** — huge tool outputs would flood the model's context, so results are
-  previewed and large files are cached instead.
+- **Context protection** — huge tool outputs would flood the model's context, so previews are
+  capped by rows, columns, per-cell characters, and total characters. Larger files are written
+  to the cache instead of being echoed back.
 - **Memory & disk protection** — downloads are capped at 10 MB (configurable) with streaming
-  byte counting.
-- **Hang protection** — every request has a timeout; stdio MCP calls are serialized.
-- **SSRF basics** — only `http://` and `https://` URLs are allowed, including after redirects.
+  byte counting; generated rows and schema fields are capped too.
+- **Hang protection** — every request has a timeout, redirects are limited to 5 hops, and stdio
+  MCP calls are serialized.
+- **SSRF protection** — only `http://` and `https://` are allowed (including after every
+  redirect), and cloud metadata / link-local hosts (`169.254.169.254`, `metadata.google.internal`,
+  `fd00:ec2::254`, `fe80::/10`, …) are blocked by default. Loopback and private ranges stay
+  allowed so local dev servers work. Set `FAUX_ALLOW_METADATA=1` to opt out.
+- **CSV formula injection** — scraped HTML tables are saved with leading `=`, `+`, `-`, and `@`
+  characters neutralized so opening the CSV in a spreadsheet cannot execute formulas. Fetched
+  files are stored byte-for-byte and are *not* rewritten; treat downloaded CSV/TSV as untrusted.
+- **Cache isolation** — GET and non-GET API responses use distinct cache keys; only GET
+  responses are ever served from the cache. Cache files are created with `0600` permissions in a
+  `0700` directory, and index entries cannot point outside the cache directory.
 - **Prompt-injection surface** — caps turn a malicious "download 10 GB" instruction into a
-  harmless error.
+  harmless error, and URLs in error messages are stripped of embedded credentials.
+- **Synthetic data only** — generated credit-card, IBAN, and phone values look realistic and may
+  pass format validators. They are not real and must never be used as actual payment or identity
+  data.
 - **Scraping** works on server-rendered HTML only. Pages that build tables with JavaScript are
   not supported (no headless browser). Respect each site's terms of service.
 
@@ -212,3 +229,5 @@ smoke test, and a publishable-tarball check on every push and pull request.
 ## License
 
 MIT
+
+Security issues: please follow [SECURITY.md](SECURITY.md) and report privately.

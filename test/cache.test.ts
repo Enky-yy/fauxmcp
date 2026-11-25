@@ -1,12 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 let cache: typeof import("../src/lib/cache.js");
+let cacheDir = "";
 
 beforeAll(async () => {
-  process.env.FAUX_CACHE_DIR = await mkdtemp(path.join(tmpdir(), "fauxmcp-cache-test-"));
+  cacheDir = await mkdtemp(path.join(tmpdir(), "fauxmcp-cache-test-"));
+  process.env.FAUX_CACHE_DIR = cacheDir;
   cache = await import("../src/lib/cache.js");
 });
 
@@ -70,5 +72,25 @@ describe("dataset cache", () => {
 
   it("returns null for unknown ids", async () => {
     expect(await cache.getDataset("does-not-exist")).toBeNull();
+  });
+
+  it("refuses index entries that escape the cache directory", async () => {
+    await writeFile(
+      path.join(cacheDir, "index.json"),
+      JSON.stringify([
+        {
+          id: "evil",
+          name: "evil",
+          file: "../outside.csv",
+          format: "csv",
+          kind: "fetch",
+          bytes: 3,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ]),
+      "utf8",
+    );
+    expect(await cache.getDataset("evil")).toBeNull();
   });
 });

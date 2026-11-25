@@ -13,14 +13,16 @@ import {
 import {
   formatBytes,
   formatRows,
+  fenced,
   toMarkdownTable,
+  truncate,
   type OutputFormat,
 } from "../lib/format.js";
 import { saveDataset } from "../lib/cache.js";
 import { ok, withErrors } from "../lib/result.js";
 
 const fieldSpecSchema = z.object({
-  name: z.string().min(1).describe("Column / field name"),
+  name: z.string().min(1).max(64).describe("Column / field name"),
   type: z.enum(FIELD_TYPES).describe("Value generator type"),
   values: z
     .array(z.union([z.string(), z.number(), z.boolean()]))
@@ -46,8 +48,9 @@ const recordInput = z.object({
     .describe(`Number of rows to generate (max ${config.maxRows})`),
   fields: z
     .array(fieldSpecSchema)
+    .max(100)
     .optional()
-    .describe("Field definitions. Omit to use a preset."),
+    .describe("Field definitions (max 100). Omit to use a preset."),
   preset: z
     .enum(PRESET_NAMES)
     .optional()
@@ -117,13 +120,17 @@ async function produceRows(opts: {
   if (rows.length <= previewLimit) {
     body =
       format === "markdown"
-        ? toMarkdownTable(rows)
-        : `\`\`\`${FENCE[format] ?? ""}\n${formatted}\n\`\`\``;
+        ? toMarkdownTable(rows, { maxCellLength: config.maxCellChars })
+        : fenced(truncate(formatted, config.previewChars), FENCE[format] ?? "");
   } else {
-    body = toMarkdownTable(rows, {
-      maxRows: previewLimit,
-      maxColumns: 12,
-    });
+    body = truncate(
+      toMarkdownTable(rows, {
+        maxRows: previewLimit,
+        maxColumns: 12,
+        maxCellLength: config.maxCellChars,
+      }),
+      config.previewChars,
+    );
   }
 
   let saveNote = "";

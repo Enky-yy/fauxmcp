@@ -21,6 +21,10 @@ export const config = {
   fetchTimeoutMs: intEnv("FAUX_FETCH_TIMEOUT_MS", 30_000),
   /** Number of rows shown inline in tool responses. */
   previewRows: intEnv("FAUX_PREVIEW_ROWS", 20),
+  /** Maximum characters in any single inline preview. */
+  previewChars: intEnv("FAUX_PREVIEW_CHARS", 8000),
+  /** Maximum characters per table cell in inline previews. */
+  maxCellChars: intEnv("FAUX_MAX_CELL_CHARS", 300),
   /** Maximum number of HTML tables scraped from one page. */
   maxTables: intEnv("FAUX_MAX_TABLES", 10),
   /** Where downloaded and generated datasets are cached. */
