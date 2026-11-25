@@ -1,5 +1,9 @@
 # fauxmcp
 
+[![CI](https://github.com/Enky-yy/fauxmcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Enky-yy/fauxmcp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/fauxmcp.svg)](https://www.npmjs.com/package/fauxmcp)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > **One MCP for all your data.** Generate realistic fake data, fetch real datasets from any URL,
 > scrape HTML tables, and query public APIs — all cached locally so you never knock on the same
 > website twice.
