@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "The data toolbox MCP — generate realistic fake data, fetch datasets from URLs, scrape HTML tables, and query public APIs.",
   "license": "MIT",
+  "author": "Enky-yy",
   "type": "module",
   "bin": {
     "fauxmcp": "./dist/index.js"
@@ -27,7 +28,12 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "inspector": "npx @modelcontextprotocol/inspector node dist/index.js"
+    "smoke": "npm run build && node scripts/smoke.mjs",
+    "inspector": "npx @modelcontextprotocol/inspector node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=18"

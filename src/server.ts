@@ -7,7 +7,13 @@ import { registerRetrievalTools } from "./tools/retrieve.js";
 
 /** Build a configured MCP server (all tools + resources registered). */
 export function createServer(): McpServer {
-  const server = new McpServer(serverInfo);
+  const server = new McpServer(serverInfo, {
+    instructions:
+      "fauxmcp is a data toolbox. Use generate_* tools to invent realistic test data " +
+      "(seeded for reproducibility), and fetch_dataset / scrape_table / query_public_api " +
+      "to pull real datasets from URLs and public APIs. Large results are cached locally: " +
+      "browse them with list_saved_datasets and page through them with read_saved_dataset.",
+  });
   registerGenerationTools(server);
   registerRetrievalTools(server);
   registerResources(server);

@@ -125,6 +125,9 @@ export function getFaker(locale?: string, seed?: number): Faker {
   return faker;
 }
 
+/** Reference instant for seeded date generation (keeps seeds fully reproducible). */
+const SEEDED_REFERENCE = new Date("2026-01-01T12:00:00.000Z");
+
 function boundedMin(spec: FieldSpec, fallback: number): number {
   return spec.min ?? fallback;
 }
@@ -134,7 +137,12 @@ function boundedMax(spec: FieldSpec, fallback: number): number {
 }
 
 /** Generate a single field value for the given row index. */
-export function generateField(faker: Faker, spec: FieldSpec, index: number): string | number | boolean {
+export function generateField(
+  faker: Faker,
+  spec: FieldSpec,
+  index: number,
+  reference: Date = new Date(),
+): string | number | boolean {
   switch (spec.type) {
     case "id":
       return index + 1;
@@ -207,11 +215,11 @@ export function generateField(faker: Faker, spec: FieldSpec, index: number): str
     case "boolean":
       return faker.datatype.boolean();
     case "date":
-      return faker.date.past({ years: 1 }).toISOString().slice(0, 10);
+      return faker.date.past({ years: 1, refDate: reference }).toISOString().slice(0, 10);
     case "datetime":
-      return faker.date.recent({ days: 30 }).toISOString();
+      return faker.date.recent({ days: 30, refDate: reference }).toISOString();
     case "time":
-      return faker.date.anytime().toISOString().slice(11, 19);
+      return faker.date.recent({ days: 1, refDate: reference }).toISOString().slice(11, 19);
     case "price":
       return faker.commerce.price({
         min: boundedMin(spec, 1),
@@ -249,11 +257,12 @@ export function generateField(faker: Faker, spec: FieldSpec, index: number): str
 /** Generate `count` rows for the given field specs. */
 export function generateRows(fields: FieldSpec[], count: number, locale?: string, seed?: number): Row[] {
   const faker = getFaker(locale, seed);
+  const reference = seed !== undefined ? SEEDED_REFERENCE : new Date();
   const rows: Row[] = [];
   for (let i = 0; i < count; i++) {
     const row: Row = {};
     for (const spec of fields) {
-      row[spec.name] = generateField(faker, spec, i);
+      row[spec.name] = generateField(faker, spec, i, reference);
     }
     rows.push(row);
   }

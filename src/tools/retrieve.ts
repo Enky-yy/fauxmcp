@@ -149,8 +149,14 @@ function nameFromUrl(url: string, fallback = "dataset"): string {
     const parsed = new URL(url);
     const segments = parsed.pathname.split("/").filter(Boolean);
     const last = segments[segments.length - 1]?.replace(/\.[a-z0-9]+$/i, "");
-    if (last) return `${parsed.hostname}-${last}`;
-    return parsed.hostname || fallback;
+    const isIpOrLocal =
+      parsed.hostname === "localhost" ||
+      /^[\d.]+$/.test(parsed.hostname) ||
+      /^\[?[0-9a-f:]+\]?$/i.test(parsed.hostname);
+    const host = isIpOrLocal ? "" : parsed.hostname;
+    if (host && last) return `${host}-${last}`;
+    if (last) return last;
+    return host || fallback;
   } catch {
     return fallback;
   }
